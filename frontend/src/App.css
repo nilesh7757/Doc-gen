@@ -30,22 +30,48 @@ main {
   padding: 20px;
 }
 
-.prompt-section {
+.chat-window {
   width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  height: 500px;
+  overflow-y: auto;
+  background-color: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   margin-bottom: 20px;
 }
 
-textarea {
+.message {
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  max-width: 80%;
+}
+
+.message.user {
+  background-color: #007bff;
+  color: white;
+  align-self: flex-end;
+  margin-left: auto;
+}
+
+.message.bot {
+  background-color: #e9e9eb;
+  color: #333;
+  align-self: flex-start;
+}
+
+.input-area {
   width: 100%;
+  display: flex;
+}
+
+input[type="text"] {
+  flex-grow: 1;
   padding: 15px;
   border: 1px solid #ccc;
-  border-radius: 8px;
+  border-radius: 8px 0 0 8px;
   font-size: 1em;
-  margin-bottom: 10px;
-  resize: vertical;
 }
 
 button {
@@ -53,7 +79,7 @@ button {
   color: white;
   border: none;
   padding: 15px 30px;
-  border-radius: 8px;
+  border-radius: 0 8px 8px 0;
   font-size: 1em;
   cursor: pointer;
   transition: background-color 0.3s;
@@ -74,6 +100,7 @@ button:hover:not(:disabled) {
   padding: 20px;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  margin-top: 20px;
 }
 
 h2 {
@@ -92,10 +119,4 @@ h2 {
   min-height: 200px;
   white-space: pre-wrap;
   word-wrap: break-word;
-}
-
-pre {
-  margin: 0;
-  font-family: monospace;
-  font-size: 1em;
 }
