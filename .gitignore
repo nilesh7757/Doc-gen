@@ -1,1 +1,4 @@
 backend/.env
+
+# Python bytecode
+*.pyc
