@@ -11,3 +11,4 @@ whitenoise
 xhtml2pdf
 django-cors-headers
 pymongo
+markdown
