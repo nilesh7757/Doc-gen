@@ -1,11 +1,17 @@
-import os
 from pymongo import MongoClient
 from bson.objectid import ObjectId
+from django.conf import settings
+import certifi
 
-# It's a good practice to use a centralized client
-client = MongoClient(os.getenv('MONGO_URI', 'mongodb://localhost:27017/'))
-db = client['legal_doc_generator']
-conversations_collection = db['conversations']
+
+
+def get_db():
+    mongo_uri = settings.MONGO_URI
+    if not mongo_uri:
+        raise Exception("MONGO_URI is not configured in your environment variables.")
+    client = MongoClient(mongo_uri, tlsCAFile=certifi.where())
+    db = client.get_default_database() # The database name is part of the connection string
+    return db
 
 def get_all_conversations():
     """Fetches all conversations, returning the id, title, created_at, and latest_document."""

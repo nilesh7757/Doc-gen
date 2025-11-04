@@ -10,11 +10,11 @@ from io import BytesIO
 from .mongo_client import get_all_conversations, get_conversation_by_id, save_conversation, update_conversation, delete_conversation
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
-from django.core.files.storage import FileSystemStorage
 from django.utils.crypto import get_random_string
 import os
+import cloudinary.uploader
 
-
+from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate, AIMessagePromptTemplate
 @api_view(['POST'])
 def chat(request):
     from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate, AIMessagePromptTemplate
@@ -211,20 +211,8 @@ def _generate_pdf_from_markdown(markdown_content):
     </html>
     """
 
-    # Resolve media/static URIs so xhtml2pdf can embed images
-    def link_callback(uri, rel):
-        if uri.startswith(settings.MEDIA_URL):
-            path = os.path.join(settings.MEDIA_ROOT, uri.replace(settings.MEDIA_URL, ''))
-            return path
-        if uri.startswith(settings.STATIC_URL):
-            static_root = getattr(settings, 'STATIC_ROOT', '') or ''
-            if static_root:
-                return os.path.join(static_root, uri.replace(settings.STATIC_URL, ''))
-        # Fallback: return as-is; remote URLs may or may not be fetched by xhtml2pdf
-        return uri
-
     result_file = BytesIO()
-    pisa_status = pisa.CreatePDF(full_html, dest=result_file, link_callback=link_callback)
+    pisa_status = pisa.CreatePDF(full_html, dest=result_file)
 
     if pisa_status.err:
         raise Exception(f'PDF generation error: {pisa_status.err}')
@@ -240,21 +228,11 @@ def upload_signature(request):
     if not file_obj:
         return Response({'error': 'No file uploaded. Use form field name "signature".'}, status=400)
 
-    allowed_content_types = {'image/png', 'image/jpeg', 'image/jpg', 'image/webp'}
-    if file_obj.content_type not in allowed_content_types:
-        return Response({'error': 'Unsupported file type. Use PNG, JPG, or WEBP.'}, status=400)
-
-    signatures_dir = os.path.join(settings.MEDIA_ROOT, 'signatures')
-    os.makedirs(signatures_dir, exist_ok=True)
-
-    ext = os.path.splitext(file_obj.name)[1].lower() or '.png'
-    safe_name = f"signature_{get_random_string(12)}{ext}"
-    storage = FileSystemStorage(location=signatures_dir, base_url=f"{settings.MEDIA_URL}signatures/")
-    filename = storage.save(safe_name, file_obj)
-    file_url = storage.url(filename)
-    absolute_url = request.build_absolute_uri(file_url)
-
-    return Response({'url': absolute_url}, status=201)
+    try:
+        upload_result = cloudinary.uploader.upload(file_obj)
+        return Response({'url': upload_result['secure_url']}, status=201)
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
 
 @api_view(['GET'])
 def download_conversation_pdf(request, pk):
