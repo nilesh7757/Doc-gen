@@ -9,14 +9,14 @@ from xhtml2pdf import pisa
 from io import BytesIO
 from .mongo_client import get_all_conversations, get_conversation_by_id, save_conversation, update_conversation, delete_conversation
 from rest_framework import status
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.utils.crypto import get_random_string
 import os
 import cloudinary.uploader
 
 from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate, AIMessagePromptTemplate
 @api_view(['POST'])
-@parser_classes([MultiPartParser, FormParser])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def chat(request):
     from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate, AIMessagePromptTemplate
     """

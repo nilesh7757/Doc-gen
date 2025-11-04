@@ -10,6 +10,7 @@ gunicorn
 whitenoise
 xhtml2pdf
 django-cors-headers
-pymongo
+pymongo==4.6.2
+dnspython==2.6.1
 markdown
 cloudinary
