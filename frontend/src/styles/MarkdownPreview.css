@@ -22,7 +22,6 @@
 
 .markdown-preview h1 {
   font-size: 16pt;
-  text-align: center;
   text-transform: uppercase;
   margin-bottom: 1.5em;
 }
@@ -30,20 +29,23 @@
 .markdown-preview h2 {
   font-size: 14pt;
   text-transform: uppercase;
-  border-bottom: 1px solid #000000;
-  padding-bottom: 0.2em;
+  
 }
 
 .markdown-preview h3 {
   font-size: 12pt;
   font-weight: bold;
-  text-decoration: underline;
+  
 }
+
+.markdown-preview [data-indent="1"] { text-indent: 1.25cm; }
+.markdown-preview [data-indent="2"] { text-indent: 2.5cm; }
+.markdown-preview [data-indent="3"] { text-indent: 3.75cm; }
+.markdown-preview [data-indent="4"] { text-indent: 5.0cm; }
 
 .markdown-preview p {
   margin-bottom: 0.8em;
   text-align: justify;
-  text-indent: 1.25cm;
 }
 
 .markdown-preview h1 + p, .markdown-preview h2 + p, .markdown-preview h3 + p, .markdown-preview h4 + p, .markdown-preview h5 + p, .markdown-preview h6 + p {

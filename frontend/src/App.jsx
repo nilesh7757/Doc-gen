@@ -8,9 +8,9 @@ import Login from "./pages/Login";
 
 import Lawyers from "./pages/Lawyers";
 import DocumentAnalyzer from "./pages/DocumentAnalyzer";
-import DocumentCreation from "./pages/DocumentCreation";
 import LawyerConnect from "./pages/LawyerConnect";
 import MyDocuments from "./pages/MyDocuments";
+import DocumentCreation from "./pages/DocumentCreation";
 
 function AppContent() {
   const location = useLocation();

@@ -1,12 +1,115 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { FileText, PenTool, Send, Download, User, Bot, Save, Edit, Eye } from 'lucide-react';
+import { FileText, PenTool, Send, Download, User, Bot, Save, Edit, Eye, Bold, Italic, Strikethrough, Code, Pilcrow, Heading1, Heading2, Heading3, Indent as IndentIcon, Outdent as OutdentIcon, AlignLeft, AlignCenter, AlignRight, AlignJustify, Underline as UnderlineIcon, Minus as HorizontalRuleIcon } from 'lucide-react';
 import axios from '../api/axios';
 import { saveAs } from 'file-saver';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import '../styles/MarkdownPreview.css';
 import toast from 'react-hot-toast';
+import DOMPurify from 'dompurify';
+
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import { Markdown } from 'tiptap-markdown';
+import { Indent } from '../lib/tiptap-extensions/indent';
+import TextAlign from '@tiptap/extension-text-align';
+import Underline from '@tiptap/extension-underline';
+
+import Image from '@tiptap/extension-image';
+
+const MenuBar = ({ editor }) => {
+  if (!editor) {
+    return null;
+  }
+
+  return (
+    <div className="flex items-center space-x-1 p-2 bg-gray-100 rounded-t-lg border-b border-gray-300">
+      <button
+        onClick={() => editor.chain().focus().toggleBold().run()}
+        disabled={!editor.can().chain().focus().toggleBold().run()}
+        className={editor.isActive('bold') ? 'is-active' : ''}
+        title="Bold (Ctrl+B)"
+      >
+        <Bold className="w-4 h-4" />
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleItalic().run()}
+        disabled={!editor.can().chain().focus().toggleItalic().run()}
+        className={editor.isActive('italic') ? 'is-active' : ''}
+        title="Italic (Ctrl+I)"
+      >
+        <Italic className="w-4 h-4" />
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleUnderline().run()}
+        disabled={!editor.can().chain().focus().toggleUnderline().run()}
+        className={editor.isActive('underline') ? 'is-active' : ''}
+        title="Underline (Ctrl+U)"
+      >
+        <UnderlineIcon className="w-4 h-4" />
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleStrike().run()}
+        disabled={!editor.can().chain().focus().toggleStrike().run()}
+        className={editor.isActive('strike') ? 'is-active' : ''}
+        title="Strikethrough (Ctrl+Shift+X)"
+      >
+        <Strikethrough className="w-4 h-4" />
+      </button>
+      <div className="w-px h-5 bg-gray-300 mx-2"></div>
+      <button
+        onClick={() => editor.chain().focus().setParagraph().run()}
+        className={editor.isActive('paragraph') ? 'is-active' : ''}
+        title="Paragraph (Ctrl+Shift+0)"
+      >
+        <Pilcrow className="w-4 h-4" />
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+        className={editor.isActive('heading', { level: 1 }) ? 'is-active' : ''}
+        title="Heading 1 (Ctrl+Alt+1)"
+      >
+        <Heading1 className="w-4 h-4" />
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+        className={editor.isActive('heading', { level: 2 }) ? 'is-active' : ''}
+        title="Heading 2 (Ctrl+Alt+2)"
+      >
+        <Heading2 className="w-4 h-4" />
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+        className={editor.isActive('heading', { level: 3 }) ? 'is-active' : ''}
+        title="Heading 3 (Ctrl+Alt+3)"
+      >
+        <Heading3 className="w-4 h-4" />
+      </button>
+      <button onClick={() => editor.chain().focus().setHorizontalRule().run()} title="Horizontal Rule">
+        <HorizontalRuleIcon className="w-4 h-4" />
+      </button>
+      <div className="w-px h-5 bg-gray-300 mx-2"></div>
+      <button onClick={() => editor.commands.indent()} title="Indent Paragraph">
+        <IndentIcon className="w-4 h-4" />
+      </button>
+      <button onClick={() => editor.commands.outdent()} title="Outdent Paragraph">
+        <OutdentIcon className="w-4 h-4" />
+      </button>
+      <div className="w-px h-5 bg-gray-300 mx-2"></div>
+      <button onClick={() => editor.chain().focus().setTextAlign('left').run()} className={editor.isActive({ textAlign: 'left' }) ? 'is-active' : ''} title="Align Left">
+        <AlignLeft className="w-4 h-4" />
+      </button>
+      <button onClick={() => editor.chain().focus().setTextAlign('center').run()} className={editor.isActive({ textAlign: 'center' }) ? 'is-active' : ''} title="Align Center">
+        <AlignCenter className="w-4 h-4" />
+      </button>
+      <button onClick={() => editor.chain().focus().setTextAlign('right').run()} className={editor.isActive({ textAlign: 'right' }) ? 'is-active' : ''} title="Align Right">
+        <AlignRight className="w-4 h-4" />
+      </button>
+      <button onClick={() => editor.chain().focus().setTextAlign('justify').run()} className={editor.isActive({ textAlign: 'justify' }) ? 'is-active' : ''} title="Align Justify">
+        <AlignJustify className="w-4 h-4" />
+      </button>
+    </div>
+  );
+};
 
 const DocumentCreation = () => {
   const { id: urlConversationId } = useParams();
@@ -15,13 +118,32 @@ const DocumentCreation = () => {
   const [title, setTitle] = useState('');
   const [chatMessage, setChatMessage] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [finalDocument, setFinalDocument] = useState(null);
+  const [finalDocument, setFinalDocument] = useState(''); // Now stores HTML
   const [conversationId, setConversationId] = useState(urlConversationId);
   const [isEditing, setIsEditing] = useState(false);
   const fileInputRef = useRef(null);
   const [signatureRole, setSignatureRole] = useState(null); // 'landlord' | 'tenant'
-  const editorRef = useRef(null);
   const chatContainerRef = useRef(null);
+
+  const editor = useEditor({
+    extensions: [StarterKit, Markdown, Image.configure({ inline: true }), Indent, TextAlign.configure({ types: ['heading', 'paragraph'] }), Underline],
+    content: finalDocument,
+    onUpdate: ({ editor }) => {
+      setFinalDocument(editor.getHTML());
+    },
+    editorProps: {
+      attributes: {
+        class: 'markdown-preview',
+      },
+    },
+  });
+
+  useEffect(() => {
+    if (editor && finalDocument !== editor.getHTML()) {
+      // AI provides markdown, so we set it as such. onUpdate will convert it to HTML.
+      editor.chain().setContent(finalDocument, false).setMeta('addToHistory', false).run();
+    }
+  }, [finalDocument, editor]);
 
   useEffect(() => {
     const fetchConversation = async () => {
@@ -32,6 +154,7 @@ const DocumentCreation = () => {
           setMessages(conversation.messages || []);
           setTitle(conversation.title || '');
           if (conversation.latest_document) {
+            // Assuming latest_document is markdown, it will be converted to HTML by the editor on load
             setFinalDocument(conversation.latest_document);
           }
         } catch (error) {
@@ -51,7 +174,7 @@ const DocumentCreation = () => {
   }, [messages]);
 
   const handleSendMessage = async () => {
-    if (!chatMessage.trim()) return;
+    if (!chatMessage.trim() || !editor) return;
 
     const userMessage = { sender: 'user', text: chatMessage, type: 'display' };
     setMessages(prev => [...prev, userMessage]);
@@ -60,10 +183,11 @@ const DocumentCreation = () => {
 
     let payloadMessages = [...messages, userMessage];
 
-    // If a document already exists, create a special context for the update
-    if (finalDocument) {
+    // If a document exists, get its markdown version for the AI context
+    if (editor.getText()) {
+      const markdownContext = editor.storage.markdown.getMarkdown();
       payloadMessages = [
-        { sender: 'user', text: `Here is the legal document we are working on. Please use this as the basis for any updates.\n\n---\n\n${finalDocument}` },
+        { sender: 'user', text: `Here is the legal document we are working on. Please use this as the basis for any updates.\n\n---\n\n${markdownContext}` },
         { sender: 'bot', text: 'Okay, I have the document. What changes would you like to make?' },
         userMessage
       ];
@@ -75,9 +199,9 @@ const DocumentCreation = () => {
       
       if (aiResponse.type === 'document') {
         const documentMarkdown = aiResponse.text;
-        setFinalDocument(documentMarkdown);
-        
-        // Add the context and display messages to the *actual* history
+        // Set the new markdown content in the editor. The onUpdate handler will convert and save it as HTML.
+        editor.chain().setContent(documentMarkdown).selectAll().indent().run();
+
         const newBotMessages = [
           { sender: 'bot', type: 'document_context', text: documentMarkdown },
           { sender: 'bot', type: 'display', text: "I have updated the document for you. You can review the changes and ask for more updates if needed." }
@@ -106,18 +230,16 @@ const DocumentCreation = () => {
     const payload = {
       title: title,
       messages: messages,
-      latest_document: finalDocument
+      latest_document: finalDocument // Save the document as HTML
     };
 
     try {
       if (conversationId) {
-        // Update existing conversation
         await axios.put(`/conversations/${conversationId}/`, payload);
         toast.success('Conversation updated successfully!');
       } else {
-        // Create new conversation
         const response = await axios.post('/conversations/', payload);
-        setConversationId(response.data.id); // Set the new ID
+        setConversationId(response.data.id);
         toast.success('Conversation saved successfully!');
       }
     } catch (error) {
@@ -131,7 +253,7 @@ const DocumentCreation = () => {
 
     try {
       const response = await axios.post('/download-pdf/', {
-        document_content: finalDocument
+        document_content: finalDocument // Send HTML to the backend
       }, {
         responseType: 'blob',
       });
@@ -142,26 +264,6 @@ const DocumentCreation = () => {
     }
   };
 
-  // Removed custom placement; handled by AI formatting via chat endpoint
-
-  const insertAtCursor = (textArea, textToInsert) => {
-    if (!textArea) return null;
-    const start = textArea.selectionStart ?? finalDocument?.length ?? 0;
-    const end = textArea.selectionEnd ?? start;
-    const before = finalDocument?.slice(0, start) ?? '';
-    const after = finalDocument?.slice(end) ?? '';
-    const next = `${before}${textToInsert}${after}`;
-    // restore caret just after inserted text
-    setTimeout(() => {
-      try {
-        textArea.focus();
-        const cursor = start + textToInsert.length;
-        textArea.setSelectionRange(cursor, cursor);
-      } catch {}
-    }, 0);
-    return next;
-  };
-
   const handleSelectSignature = (role) => {
     setSignatureRole(role);
     if (fileInputRef.current) fileInputRef.current.click();
@@ -169,7 +271,7 @@ const DocumentCreation = () => {
 
   const handleSignatureFileChange = async (e) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !editor) return;
     if (!['image/png','image/jpeg','image/jpg','image/webp'].includes(file.type)) {
       toast.error('Please select a PNG, JPG, or WEBP image.');
       return;
@@ -186,7 +288,6 @@ const DocumentCreation = () => {
         return;
       }
       const role = signatureRole === 'landlord' ? 'landlord' : 'tenant';
-      // Ask AI (Gemini) to place and format the document properly with this signature
       const signatureMarkdown = `![signature ${role}](${url})`;
       const instruction = `You are formatting a legal document. Insert and position the signature image for the ${role === 'landlord' ? 'First Party (Landlord)' : 'Second Party (Tenant)'} in the correct designated area so the final order is:
 1) First Party signature
@@ -196,23 +297,22 @@ const DocumentCreation = () => {
 Use exactly this markdown image for the ${role === 'landlord' ? 'First Party' : 'Second Party'}: ${signatureMarkdown}
 Preserve all existing content and headings. Return the entire updated document in JSON as {"type":"document","text":"...markdown..."}.`;
 
-      // Build payload with document context if available
       let payloadMessages = [...messages];
-      if (finalDocument) {
+      if (editor.getText()) {
+        const markdownContext = editor.storage.markdown.getMarkdown();
         payloadMessages = [
-          { sender: 'user', text: `Here is the current legal document. Please use it as the basis for updates.\n\n---\n\n${finalDocument}` },
+          { sender: 'user', text: `Here is the current legal document. Please use it as the basis for updates.\n\n---\n\n${markdownContext}` },
           { sender: 'bot', text: 'Okay, I have the document. What changes would you like to make?' }
         ];
       }
       payloadMessages.push({ sender: 'user', text: instruction });
 
-      // Optional: show generating state
       setIsGenerating(true);
       const chatRes = await axios.post('chat/', { messages: payloadMessages });
       const aiResponse = chatRes.data;
       if (aiResponse.type === 'document') {
         const documentMarkdown = aiResponse.text;
-        setFinalDocument(documentMarkdown);
+        editor.commands.setContent(documentMarkdown);
         const newBotMessages = [
           { sender: 'bot', type: 'document_context', text: documentMarkdown },
           { sender: 'bot', type: 'display', text: 'I have updated the document with the signature placement.' }
@@ -220,7 +320,7 @@ Preserve all existing content and headings. Return the entire updated document i
         setMessages(prev => [...(finalDocument ? prev : messages), ...newBotMessages]);
         toast.success('Signature placed and document formatted.');
       } else {
-        setMessages(prev => [...prev, { sender: 'bot', type: 'display', text: aiResponse.text || 'AI response received.' }]);
+        setMessages(prev => [...prev, { sender: 'bot', type: 'display', text: aiResponse.text || 'AI responded. Please review the update.' }]);
         toast.success('AI responded. Please review the update.');
       }
     } catch (error) {
@@ -327,16 +427,12 @@ Preserve all existing content and headings. Return the entire updated document i
             </div>
 
             {isEditing ? (
-              <textarea
-                value={finalDocument}
-                onChange={(e) => setFinalDocument(e.target.value)}
-                ref={editorRef}
-                className="w-full h-96 p-4 border border-gray-300 rounded-lg bg-gray-50 font-mono text-sm"
-              />
-            ) : (
-              <div className="markdown-preview">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{finalDocument}</ReactMarkdown>
+              <div>
+                <MenuBar editor={editor} />
+                <EditorContent editor={editor} />
               </div>
+            ) : (
+              <div className="markdown-preview" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(finalDocument) }} />
             )}
 
             <div className="mt-6 flex items-center justify-center gap-3 flex-wrap">
