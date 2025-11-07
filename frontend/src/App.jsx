@@ -28,7 +28,7 @@ function AppContent() {
         <main className={shouldShowNavbar ? "pt-20 bg-gray-50" : "bg-gray-50"}>
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/document-analyser" element={<DocumentAnalyzer />} />
+          <Route path="/document-analyzer/:id" element={<DocumentAnalyzer />} />
           <Route path="/document-creation" element={<DocumentCreation />} />
           <Route path="/document-creation/:id" element={<DocumentCreation />} />
           <Route path="/lawyer-connect" element={<LawyerConnect />} />

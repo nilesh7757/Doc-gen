@@ -1,186 +1,118 @@
-import React, { useState } from 'react';
-import { Upload, Bot, MessageCircle, Send, FileText, Search } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import axios from '../api/axios';
+import { saveAs } from 'file-saver';
+import toast from 'react-hot-toast';
+import DOMPurify from 'dompurify';
+import { Download, History, Edit } from 'lucide-react';
 
 const DocumentAnalyzer = () => {
-  const [uploadedFile, setUploadedFile] = useState(null);
-  const [chatMessage, setChatMessage] = useState('');
-  const [chatHistory, setChatHistory] = useState([
-    {
-      id: 1,
-      sender: 'AdvocAI',
-      message: "Hi! I've analyzed your document. Feel free to ask me any questions about the terms, risks, or anything else you'd like to understand better.",
-      timestamp: new Date().toLocaleTimeString()
-    }
-  ]);
+  const { id: conversationId } = useParams();
+  const navigate = useNavigate();
+  const [conversation, setConversation] = useState(null);
+  const [selectedVersionContent, setSelectedVersionContent] = useState('');
+  const [selectedVersionNumber, setSelectedVersionNumber] = useState(null);
 
-  const handleFileUpload = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      setUploadedFile(file);
-      // Here you would typically send the file to your backend for analysis
-      console.log('File uploaded:', file.name);
-    }
-  };
+  useEffect(() => {
+    const fetchConversation = async () => {
+      try {
+        const response = await axios.get(`conversations/${conversationId}/`);
+        setConversation(response.data);
+        // Do not set initial selected version, let user choose
+        // if (response.data.document_versions && response.data.document_versions.length > 0) {
+        //   const latestVersion = response.data.document_versions[response.data.document_versions.length - 1];
+        //   setSelectedVersionContent(latestVersion.content);
+        //   setSelectedVersionNumber(latestVersion.version_number);
+        // }
+      } catch (error) {
+        console.error('Error fetching conversation:', error);
+        toast.error('Could not load conversation details.');
+        navigate('/my-documents'); // Redirect if conversation not found or error
+      }
+    };
 
-  const handleDragOver = (event) => {
-    event.preventDefault();
-  };
+    fetchConversation();
+  }, [conversationId, navigate]);
 
-  const handleDrop = (event) => {
-    event.preventDefault();
-    const files = event.dataTransfer.files;
-    if (files.length > 0) {
-      setUploadedFile(files[0]);
-      console.log('File dropped:', files[0].name);
-    }
-  };
-
-  const handleSendMessage = () => {
-    if (chatMessage.trim()) {
-      const newMessage = {
-        id: chatHistory.length + 1,
-        sender: 'User',
-        message: chatMessage,
-        timestamp: new Date().toLocaleTimeString()
-      };
-      setChatHistory([...chatHistory, newMessage]);
-      setChatMessage('');
-      
-      // Here you would typically send the message to your AI backend
-      // and add the response to chatHistory
+  const handleVersionChange = (event) => {
+    const versionNum = parseInt(event.target.value);
+    setSelectedVersionNumber(versionNum);
+    const version = conversation.document_versions.find(v => v.version_number === versionNum);
+    if (version) {
+      setSelectedVersionContent(version.content);
     }
   };
 
-  const handleKeyPress = (event) => {
-    if (event.key === 'Enter') {
-      handleSendMessage();
+  const handleDownloadVersionPdf = async () => {
+    if (!conversation || selectedVersionNumber === null) {
+      toast.error('Please select a version to download.');
+      return;
+    }
+    try {
+      const response = await axios.get(`conversations/${conversationId}/versions/${selectedVersionNumber}/download/`, {
+        responseType: 'blob',
+      });
+      const filename = `${conversation.title || 'document'}_v${selectedVersionNumber}.pdf`;
+      saveAs(response.data, filename);
+      toast.success(`Version ${selectedVersionNumber} PDF downloaded!`);
+    } catch (error) {
+      console.error('Error downloading version PDF:', error);
+      toast.error(`Failed to download PDF for version ${selectedVersionNumber}.`);
     }
   };
+
+  if (!conversation) {
+    return <div className="text-center py-8">Loading conversation...</div>;
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header Section */}
-        <div className="text-center mb-12">
-          <div className="flex items-center justify-center mb-4">
-            <FileText className="w-8 h-8 text-blue-600 mr-3" />
-            <h1 className="text-4xl font-bold text-gray-900">AI Document Analyser</h1>
-          </div>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            Upload your legal document and get instant AI-powered analysis, risk assessment, and plain English explanations of complex legal terms.
-          </p>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="bg-white rounded-2xl shadow-xl p-8 mb-8 text-center">
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">{conversation.title}</h1>
+          <p className="text-xl text-gray-600">Analyze and review document versions.</p>
         </div>
 
-        {/* Main Content Cards */}
-        <div className="grid lg:grid-cols-2 gap-8 mb-12">
-          {/* Upload Document Card */}
-          <div className="bg-white rounded-2xl shadow-lg p-8">
-            <div className="flex items-center mb-6">
-              <Upload className="w-6 h-6 text-blue-600 mr-3" />
-              <h2 className="text-2xl font-bold text-gray-900">Upload Document</h2>
-            </div>
-            
-            <div
-              className="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center hover:border-blue-500 transition-colors cursor-pointer"
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
-              onClick={() => document.getElementById('file-upload').click()}
-            >
-              <input
-                id="file-upload"
-                type="file"
-                accept=".pdf,.docx,.txt"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-              
-              <div className="flex flex-col items-center">
-                <FileText className="w-16 h-16 text-gray-400 mb-4" />
-                <p className="text-lg font-medium text-gray-700 mb-2">
-                  Drag and drop your legal document here
-                </p>
-                <p className="text-sm text-gray-500">
-                  or click to browse files (PDF, DOCX, TXT)
-                </p>
-              </div>
-            </div>
-
-            {uploadedFile && (
-              <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-                <div className="flex items-center">
-                  <FileText className="w-5 h-5 text-green-600 mr-2" />
-                  <span className="text-green-800 font-medium">{uploadedFile.name}</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* AI Analysis Results Card */}
-          <div className="bg-white rounded-2xl shadow-lg p-8">
-            <div className="flex items-center mb-6">
-              <Bot className="w-6 h-6 text-blue-600 mr-3" />
-              <h2 className="text-2xl font-bold text-gray-900">AI Analysis Results</h2>
-            </div>
-            
-            <div className="flex flex-col items-center justify-center h-64 text-center">
-              <Search className="w-20 h-20 text-gray-300 mb-4" />
-              <p className="text-gray-500 text-lg">
-                Upload a document to see AI-powered analysis results here
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Chat Interface */}
-        <div className="bg-white rounded-2xl shadow-lg p-8">
-          <div className="flex items-center mb-6">
-            <MessageCircle className="w-6 h-6 text-blue-600 mr-3" />
-            <h2 className="text-2xl font-bold text-gray-900">Ask Questions About Your Document</h2>
-          </div>
-
-          {/* Chat Messages */}
-          <div className="space-y-4 mb-6 max-h-96 overflow-y-auto">
-            {chatHistory.map((message) => (
-              <div
-                key={message.id}
-                className={`flex ${message.sender === 'User' ? 'justify-end' : 'justify-start'}`}
+        <div className="bg-white rounded-2xl shadow-xl p-6 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><History className="w-6 h-6" /> Document Versions</h2>
+            <div className="flex items-center gap-3">
+              <select
+                onChange={handleVersionChange}
+                value={selectedVersionNumber || ''}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               >
-                <div
-                  className={`max-w-xs lg:max-w-md px-4 py-3 rounded-lg ${
-                    message.sender === 'User'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-200 text-gray-800'
-                  }`}
-                >
-                  <p className="text-sm">{message.message}</p>
-                  <p className={`text-xs mt-1 ${
-                    message.sender === 'User' ? 'text-blue-100' : 'text-gray-500'
-                  }`}>
-                    {message.timestamp}
-                  </p>
-                </div>
-              </div>
-            ))}
+                <option value="" disabled>Select Version</option>
+                {conversation.document_versions.map((version) => (
+                  <option key={version.version_number} value={version.version_number}>
+                    Version {version.version_number} ({new Date(version.uploaded_at).toLocaleString()})
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => navigate(`/document-creation/${conversationId}?version=${selectedVersionNumber}`)}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                disabled={selectedVersionNumber === null}
+              >
+                <Edit className="w-5 h-5" />
+                Edit this Version
+              </button>
+              <button
+                onClick={handleDownloadVersionPdf}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                disabled={selectedVersionNumber === null}
+              >
+                <Download className="w-5 h-5" />
+                Download PDF
+              </button>
+            </div>
           </div>
 
-          {/* Chat Input */}
-          <div className="flex space-x-4">
-            <input
-              type="text"
-              value={chatMessage}
-              onChange={(e) => setChatMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Ask me anything about your document...."
-              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
-            />
-            <button
-              onClick={handleSendMessage}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
-            >
-              <Send className="w-5 h-5" />
-              <span>Send</span>
-            </button>
-          </div>
+          {selectedVersionContent ? (
+            <div className="markdown-preview p-4 border border-gray-200 rounded-lg bg-gray-50" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selectedVersionContent) }} />
+          ) : (
+            <p className="text-gray-500 text-center">Select a version to view its content.</p>
+          )}
         </div>
       </div>
     </div>

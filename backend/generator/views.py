@@ -7,7 +7,7 @@ from django.http import FileResponse
 import markdown
 from xhtml2pdf import pisa
 from io import BytesIO
-from .mongo_client import get_all_conversations, get_conversation_by_id, save_conversation, update_conversation, delete_conversation
+from .mongo_client import get_all_conversations, get_conversation_by_id, save_conversation, update_conversation, delete_conversation, get_document_version_content
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.utils.crypto import get_random_string
@@ -15,6 +15,8 @@ import os
 import cloudinary.uploader
 
 from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate, AIMessagePromptTemplate
+
+
 @api_view(['POST'])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def chat(request):
@@ -91,6 +93,7 @@ def chat(request):
         print(f"Type of error: {type(e)}")
         return Response({'error': str(e)}, status=500)
 
+
 @api_view(['POST'])
 def download_pdf(request):
     """
@@ -109,7 +112,10 @@ def download_pdf(request):
         return Response({'error': f'Error generating PDF: {e}'}, status=500)
 
 def _generate_pdf_from_markdown(markdown_content):
-    """Helper function to convert markdown string to a PDF file response."""
+    """
+    Helper function to convert markdown string to a PDF file response.
+    This function is used by the download_pdf view.
+    """
     html_content = markdown.markdown(markdown_content)
 
     pdf_style_css = """
@@ -236,7 +242,9 @@ def _generate_pdf_from_markdown(markdown_content):
 @api_view(['POST'])
 @parser_classes([MultiPartParser, FormParser])
 def upload_signature(request):
-    """Accepts an image upload and returns its accessible URL for embedding in markdown."""
+    """
+    Accepts an image upload and returns its accessible URL for embedding in markdown.
+    """
     file_obj = request.FILES.get('signature') or request.FILES.get('file')
     if not file_obj:
         return Response({'error': 'No file uploaded. Use form field name "signature".'}, status=400)
@@ -247,23 +255,67 @@ def upload_signature(request):
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
+
 @api_view(['GET'])
-def download_conversation_pdf(request, pk):
+def download_latest_conversation_pdf(request, pk):
     """
-    Downloads the latest document from a conversation as a PDF.
+    Downloads the latest document content from a conversation as a PDF.
     """
     conversation = get_conversation_by_id(pk)
-    if not conversation or not conversation.get('latest_document'):
-        return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+    if not conversation or 'document_versions' not in conversation or not conversation['document_versions']:
+        return Response({'error': 'No document content found for this conversation.'}, status=status.HTTP_404_NOT_FOUND)
 
     try:
-        document_content = conversation['latest_document']
-        pdf_file = _generate_pdf_from_markdown(document_content)
+        # Get the content of the latest version
+        latest_version_content = conversation['document_versions'][-1]['content']
+        pdf_file = _generate_pdf_from_markdown(latest_version_content)
         
         response = FileResponse(pdf_file, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{conversation.get("title", "legal_document")}.pdf"'
         return response
     except Exception as e:
+        return Response({'error': f'Error generating PDF: {e}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def get_version_content(request, pk, version_number):
+    """
+    Retrieves the content of a specific document version from a conversation.
+    """
+    try:
+        conversation = get_conversation_by_id(pk)
+        if not conversation or 'document_versions' not in conversation or not conversation['document_versions']:
+            return Response({'error': 'No document versions found for this conversation.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        version = next((v for v in conversation['document_versions'] if v['version_number'] == version_number), None)
+        if version:
+            return Response({'content': version['content']}, status=status.HTTP_200_OK)
+        return Response({'error': 'Version content not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        print(f"Error in get_version_content: {e}")
+        return Response({'error': f'Error retrieving version content: {e}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def download_version_pdf(request, pk, version_number):
+    """
+    Downloads a specific document version from a conversation as a PDF.
+    """
+    try:
+        conversation = get_conversation_by_id(pk)
+        if not conversation or 'document_versions' not in conversation or not conversation['document_versions']:
+            return Response({'error': 'No document versions found for this conversation.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        version = next((v for v in conversation['document_versions'] if v['version_number'] == version_number), None)
+        if not version:
+            return Response({'error': 'Version content not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        pdf_file = _generate_pdf_from_markdown(version['content'])
+        filename = f"{conversation.get("title", "legal_document")}_v{version_number}.pdf"
+        
+        response = FileResponse(pdf_file, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+    except Exception as e:
+        print(f"Error in download_version_pdf: {e}")
         return Response({'error': f'Error generating PDF: {e}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET', 'POST'])
@@ -278,11 +330,15 @@ def conversation_list(request):
     elif request.method == 'POST':
         title = request.data.get('title')
         messages = request.data.get('messages')
-        latest_document = request.data.get('latest_document') # Get the new field
+        initial_document_content = request.data.get('initial_document_content')
+        notes = request.data.get('notes', 'Initial Version')
+
+        print(f"[DEBUG Backend] conversation_list (POST) - Received messages: {messages}")
+
         if not title or not messages:
             return Response({'error': 'Title and messages are required'}, status=status.HTTP_400_BAD_REQUEST)
         
-        conversation_id = save_conversation(title, messages, latest_document)
+        conversation_id = save_conversation(title, messages, initial_document_content, uploaded_by=(request.user.username if request.user.is_authenticated else 'anonymous'), notes=notes)
         if conversation_id:
             return Response({'id': conversation_id}, status=status.HTTP_201_CREATED)
         else:
@@ -303,11 +359,15 @@ def conversation_detail(request, pk):
     elif request.method == 'PUT':
         title = request.data.get('title')
         messages = request.data.get('messages')
-        latest_document = request.data.get('latest_document')
+        new_document_content = request.data.get('new_document_content')
+        notes = request.data.get('notes', f'Version update via AI editor')
+
+        print(f"[DEBUG Backend] conversation_detail (PUT) - Received messages: {messages}")
+
         if not title or not messages:
             return Response({'error': 'Title and messages are required'}, status=status.HTTP_400_BAD_REQUEST)
         
-        success = update_conversation(pk, title, messages, latest_document)
+        success = update_conversation(pk, title, messages, new_document_content, uploaded_by=(request.user.username if request.user.is_authenticated else 'anonymous'), notes=notes)
         if success:
             return Response({'status': 'success'}, status=status.HTTP_200_OK)
         else:

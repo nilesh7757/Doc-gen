@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { FileText, PenTool, Send, Download, User, Bot, Save, Edit, Eye, Bold, Italic, Strikethrough, Code, Pilcrow, Heading1, Heading2, Heading3, Indent as IndentIcon, Outdent as OutdentIcon, AlignLeft, AlignCenter, AlignRight, AlignJustify, Underline as UnderlineIcon, Minus as HorizontalRuleIcon } from 'lucide-react';
 import axios from '../api/axios';
 import { saveAs } from 'file-saver';
@@ -112,14 +112,17 @@ const MenuBar = ({ editor }) => {
 };
 
 const DocumentCreation = () => {
-  const { id: urlConversationId } = useParams();
+  const { id: mongoConversationId } = useParams(); // This is the MongoDB conversation ID
+  const navigate = useNavigate();
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const versionToLoad = queryParams.get('version');
   
   const [messages, setMessages] = useState([]);
   const [title, setTitle] = useState('');
   const [chatMessage, setChatMessage] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [finalDocument, setFinalDocument] = useState(''); // Now stores HTML
-  const [conversationId, setConversationId] = useState(urlConversationId);
   const [isEditing, setIsEditing] = useState(false);
   const fileInputRef = useRef(null);
   const [signatureRole, setSignatureRole] = useState(null); // 'landlord' | 'tenant'
@@ -138,6 +141,46 @@ const DocumentCreation = () => {
     },
   });
 
+  const fetchConversation = async (idToFetch) => {
+    console.log("[DEBUG Frontend] fetchConversation called with ID:", idToFetch);
+    if (idToFetch) {
+      try {
+        const convResponse = await axios.get(`conversations/${idToFetch}/`);
+        const conversation = convResponse.data;
+        console.log("[DEBUG Frontend] Fetched conversation messages:", conversation.messages);
+        setTitle(conversation.title || '');
+        setMessages(conversation.messages || []);
+        
+        if (conversation.document_versions && conversation.document_versions.length > 0) {
+          let contentToLoad = '';
+          if (versionToLoad) {
+            const specificVersion = conversation.document_versions.find(v => v.version_number === parseInt(versionToLoad));
+            if (specificVersion) {
+              contentToLoad = specificVersion.content;
+            } else {
+              toast.error(`Version ${versionToLoad} not found.`);
+              contentToLoad = conversation.document_versions[conversation.document_versions.length - 1].content; // Fallback to latest
+            }
+          } else {
+            contentToLoad = conversation.document_versions[conversation.document_versions.length - 1].content; // Default to latest
+          }
+          setFinalDocument(contentToLoad);
+        } else {
+          setFinalDocument(''); // Clear document if no versions
+        }
+      } catch (error) {
+        console.error('Error fetching conversation:', error);
+        toast.error('Could not load conversation.');
+      }
+    } else {
+      // Reset state for new document creation
+      console.log("[DEBUG Frontend] Resetting state for new document creation.");
+      setTitle('');
+      setMessages([]);
+      setFinalDocument('');
+    }
+  };
+
   useEffect(() => {
     if (editor && finalDocument !== editor.getHTML()) {
       // AI provides markdown, so we set it as such. onUpdate will convert it to HTML.
@@ -146,26 +189,8 @@ const DocumentCreation = () => {
   }, [finalDocument, editor]);
 
   useEffect(() => {
-    const fetchConversation = async () => {
-      if (conversationId) {
-        try {
-          const response = await axios.get(`/conversations/${conversationId}/`);
-          const conversation = response.data;
-          setMessages(conversation.messages || []);
-          setTitle(conversation.title || '');
-          if (conversation.latest_document) {
-            // Assuming latest_document is markdown, it will be converted to HTML by the editor on load
-            setFinalDocument(conversation.latest_document);
-          }
-        } catch (error) {
-          console.error('Error fetching conversation:', error);
-          toast.error('Could not load conversation.');
-          setConversationId(null); // Reset if fetch fails
-        }
-      }
-    };
-    fetchConversation();
-  }, [conversationId]);
+    fetchConversation(mongoConversationId);
+  }, [mongoConversationId, versionToLoad]); // Re-fetch when ID or version changes
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -199,7 +224,7 @@ const DocumentCreation = () => {
       
       if (aiResponse.type === 'document') {
         const documentMarkdown = aiResponse.text;
-        // Set the new markdown content in the editor. The onUpdate handler will convert and save it as HTML.
+        // Set the new markdown content in the editor. The onUpdate handler will convert and save it to HTML.
         editor.chain().setContent(documentMarkdown).selectAll().indent().run();
 
         const newBotMessages = [
@@ -222,49 +247,65 @@ const DocumentCreation = () => {
   };
 
   const handleSaveConversation = async () => {
-    if (!title.trim() || messages.length === 0) {
-      toast.error('Please provide a title and have at least one message in the conversation.');
+    if (!title.trim()) {
+      toast.error('Please provide a title for the document.');
       return;
     }
 
-    const payload = {
+    // Payload for the conversation history + new version content
+    const conversationPayload = {
       title: title,
-      messages: messages,
-      latest_document: finalDocument // Save the document as HTML
+      messages: messages, // <--- Debug: Check this value
+      new_document_content: finalDocument // Send new document content to be saved as a new version
     };
+    console.log("[DEBUG Frontend] handleSaveConversation - messages being sent:", conversationPayload.messages);
 
     try {
-      if (conversationId) {
-        await axios.put(`/conversations/${conversationId}/`, payload);
-        toast.success('Conversation updated successfully!');
-      } else {
-        const response = await axios.post('/conversations/', payload);
-        setConversationId(response.data.id);
-        toast.success('Conversation saved successfully!');
+      let idToUseForFetch = mongoConversationId; // Use the ID from params initially
+
+      if (!mongoConversationId) { // If it's a new document
+        const convResponse = await axios.post('conversations/', { 
+            title: title, 
+            messages: messages, // Send the actual messages state
+            initial_document_content: finalDocument 
+        });
+        idToUseForFetch = convResponse.data.id; // Get the new ID
+        // Update the URL in the browser without causing a full re-render that loses state
+        // This will also cause mongoConversationId from useParams to update eventually
+        navigate(`/document-creation/${idToUseForFetch}`, { replace: true });
+        toast.success('New Document created and saved as Version 0!');
+      } else { // If updating an existing document
+        await axios.put(`conversations/${mongoConversationId}/`, conversationPayload);
+        toast.success('Document updated and new version saved!');
       }
+      // Explicitly fetch the conversation using the *correct* ID
+      // This ensures the component's state is updated with the latest data from the DB
+      // including the newly saved version and messages.
+      await fetchConversation(idToUseForFetch);
+
     } catch (error) {
-      console.error('Error saving conversation:', error);
-      toast.error('Failed to save conversation.');
+      console.error('Error saving document/conversation:', error);
+      toast.error(`Failed to save document or conversation: ${error.message}`);
     }
   };
 
   const handleDownloadPdf = async () => {
-    if (!finalDocument) return;
-
+    if (!mongoConversationId) {
+      toast.error('Please save the document first.');
+      return;
+    }
     try {
-      const response = await axios.post('/download-pdf/', {
-        document_content: finalDocument // Send HTML to the backend
-      }, {
+      const response = await axios.get(`conversations/${mongoConversationId}/download/`, {
         responseType: 'blob',
       });
       saveAs(response.data, `${title || 'legal_document'}.pdf`);
     } catch (error) {
       console.error('Error downloading PDF:', error);
-      toast.error('Failed to download PDF.');
+      toast.error(`Failed to download PDF: ${error.message}`);
     }
   };
 
-  const handleSelectSignature = (role) => {
+  const handleSelectSignature = async (role) => {
     setSignatureRole(role);
     if (fileInputRef.current) fileInputRef.current.click();
   };
@@ -295,13 +336,13 @@ const DocumentCreation = () => {
 3) Second Party signature
 4) Second Party name
 Use exactly this markdown image for the ${role === 'landlord' ? 'First Party' : 'Second Party'}: ${signatureMarkdown}
-Preserve all existing content and headings. Return the entire updated document in JSON as {"type":"document","text":"...markdown..."}.`;
+Preserve all existing content and headings. Return the entire updated document in JSON as {"type":"document","text":"...markdown..."}.`.replace(/\\/g, '\\\\');
 
       let payloadMessages = [...messages];
       if (editor.getText()) {
-        const markdownContext = editor.storage.markdown.getMarkdown();
+        const markdownContext = editor.storage.markdown.getMarkdown().replace(/\\/g, '\\\\');
         payloadMessages = [
-          { sender: 'user', text: `Here is the current legal document. Please use it as the basis for updates.\n\n---\n\n${markdownContext}` },
+          { sender: 'user', text: `Here is the legal document we are working on. Please use this as the basis for any updates.\n\n---\n\n${markdownContext}` },
           { sender: 'bot', text: 'Okay, I have the document. What changes would you like to make?' }
         ];
       }
@@ -317,7 +358,7 @@ Preserve all existing content and headings. Return the entire updated document i
           { sender: 'bot', type: 'document_context', text: documentMarkdown },
           { sender: 'bot', type: 'display', text: 'I have updated the document with the signature placement.' }
         ];
-        setMessages(prev => [...(finalDocument ? prev : messages), ...newBotMessages]);
+        setMessages(prev => [...prev, ...newBotMessages]);
         toast.success('Signature placed and document formatted.');
       } else {
         setMessages(prev => [...prev, { sender: 'bot', type: 'display', text: aiResponse.text || 'AI responded. Please review the update.' }]);
@@ -348,10 +389,10 @@ Preserve all existing content and headings. Return the entire updated document i
         <div className="bg-white rounded-2xl shadow-xl p-8 mb-8 text-center">
           <div className="flex items-center justify-center mb-4">
             <FileText className="w-10 h-10 text-blue-600 mr-3" />
-            <h1 className="text-4xl font-bold text-gray-900">Create New Document</h1>
+            <h1 className="text-4xl font-bold text-gray-900">{mongoConversationId ? 'Edit Document' : 'Create New Document'}</h1>
           </div>
           <p className="text-xl text-gray-600">
-            {conversationId ? 'Continue your conversation' : 'Build your legal document from scratch with our AI assistant.'}
+            {mongoConversationId ? 'Continue editing your document' : 'Build your legal document from scratch with our AI assistant.'}
           </p>
         </div>
 
@@ -361,7 +402,7 @@ Preserve all existing content and headings. Return the entire updated document i
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Enter conversation title to save..."
+                placeholder="Enter document title..."
                 className="flex-1 px-6 py-4 text-lg border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-600 outline-none"
             />
             <button
@@ -369,7 +410,7 @@ Preserve all existing content and headings. Return the entire updated document i
                 className="px-6 py-4 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors flex items-center space-x-2"
             >
                 <Save className="w-5 h-5" />
-                <span>{conversationId ? 'Update' : 'Save'}</span>
+                <span>{mongoConversationId ? 'Save New Version' : 'Create & Save'}</span>
             </button>
         </div>
 
@@ -394,6 +435,7 @@ Preserve all existing content and headings. Return the entire updated document i
 
           <div className="flex space-x-4">
             <textarea
+              type="text"
               value={chatMessage}
               onChange={(e) => setChatMessage(e.target.value)}
               onKeyPress={handleKeyPress}
@@ -405,7 +447,7 @@ Preserve all existing content and headings. Return the entire updated document i
             <button
               onClick={handleSendMessage}
               disabled={isGenerating}
-              className="px-6 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors flex items-center space-x-2 disabled:bg-gray-400"
+              className="px-6 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors flex items-center space-x-2"
             >
               <Send className="w-5 h-5" />
               <span>Send</span>

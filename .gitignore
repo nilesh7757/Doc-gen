@@ -1,4 +1,10 @@
-backend/.env
+# Django
+db.sqlite3
+media/
 
-# Python bytecode
+# Python
+__pycache__/
+venv/
+
+backend/.env
 *.pyc
